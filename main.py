@@ -3,8 +3,8 @@ from dotenv import load_dotenv
 from openai import OpenAI
 import argparse
 from prompts import system_prompt
-from call_function import available_functions
-import json
+from call_function import available_functions, call_function
+
 
 def main():
     parser = argparse.ArgumentParser(description="Chatbot")
@@ -23,27 +23,36 @@ def main():
         base_url="https://openrouter.ai/api/v1",
         api_key=api_key,
     )
-    response = client.chat.completions.create(
-        model="openrouter/free",
-        messages=messages,
-        tools=available_functions,
-    )
-    usage = response.usage
-    message = response.choices[0].message
-    if usage is None:
+    for _ in range(20):
+        response = client.chat.completions.create(
+            model="openrouter/free",
+            messages=messages,
+            tools=available_functions,
+        )
+        usage = response.usage
+        message = response.choices[0].message
+        messages.append(message)
+        if usage is None:
             raise RuntimeError("API request failed: usage metadata not found.")
-    if args.verbose:
-        print(f"User prompt: {args.user_prompt}")
-        print(f"Prompt tokens: {usage.prompt_tokens}")
-        print(f"Response tokens: {usage.completion_tokens}")
-    if message.tool_calls:
-        for tool_call in message.tool_calls:
-            function_args = json.loads(tool_call.function.arguments or "{}")
-            print(f"Calling function: {tool_call.function.name}({function_args})")
-    else:
-        print(response.choices[0].message.content)
+        if args.verbose:
+            print(f"User prompt: {args.user_prompt}")
+            print(f"Prompt tokens: {usage.prompt_tokens}")
+            print(f"Response tokens: {usage.completion_tokens}")
+        if message.tool_calls:
+            for tool_call in message.tool_calls:
+                result_message = call_function(tool_call, args.verbose)
+                messages.append(result_message)
+                if result_message["content"] == "":
+                    raise Exception(f"{tool_call.function.name} failed")
+                if args.verbose:
+                    print(f"-> {result_message['content']}")
 
+        else:
+            print(message.content)
+            return
 
+    print("ERROR: Maximum number of iterations reached")
+    sys.exit(1)
 
 
 if __name__ == "__main__":
